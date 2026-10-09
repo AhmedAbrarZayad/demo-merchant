@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Massivemarket Demo Merchant - Webhook Tester</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Massivemarket Demo Merchant</h1>
+            <p class="subtitle">Webhook Integration Tester</p>
+        </header>
+
+        <section class="card config-section">
+            <h2>Configuration</h2>
+            <p class="help-text">Get these values from your Massivemarket Merchant Portal</p>
+            <div class="form-group">
+                <label for="apiBaseUrl">API Base URL</label>
+                <input type="url" id="apiBaseUrl" placeholder="https://api.massivemarket.com" value="http://localhost:8000">
+                <span class="help-text">Include protocol, no trailing slash</span>
+            </div>
+            <div class="form-group">
+                <label for="backendUrl">Backend Proxy URL <span class="optional-badge">(Optional)</span></label>
+                <input type="url" id="backendUrl" placeholder="Leave empty for same-origin (Vercel)" value="">
+                <span class="help-text">Only needed for local development. Leave empty when deployed to Vercel.</span>
+            </div>
+            <div class="form-group">
+                <label for="shopId">Shop ID (UUID)</label>
+                <input type="text" id="shopId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+                <span class="help-text">Found in your shop settings</span>
+            </div>
+            <div class="form-group">
+                <label for="webhookSecret">Webhook Secret</label>
+                <div class="secret-input">
+                    <input type="password" id="webhookSecret" placeholder="Your webhook secret from portal">
+                    <button type="button" id="toggleSecret" class="btn-icon" aria-label="Toggle visibility">👁</button>
+                </div>
+                <span class="help-text">Generated in your merchant portal</span>
+            </div>
+            <button id="testConfig" class="btn btn-secondary">Test Configuration</button>
+        </section>
+
+        <section class="card webhook-section">
+            <h2>Send Test Webhook</h2>
+            
+            <div class="webhook-type-selector">
+                <button type="button" class="tab-btn active" data-type="order_confirmation">Order Confirmation</button>
+                <button type="button" class="tab-btn" data-type="order_cancellation">Order Cancellation</button>
+            </div>
+
+            <div id="orderConfirmationFields" class="webhook-fields">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="orderId">Order ID</label>
+                        <input type="text" id="orderId" value="ORD-DEMO-001">
+                    </div>
+                    <div class="form-group">
+                        <label for="trackingCode">Tracking Code</label>
+                        <input type="text" id="trackingCode" value="TRK-DEMO-ABC123">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="amount">Amount (USD)</label>
+                        <input type="number" id="amount" step="0.01" min="0.01" max="50000" value="99.99">
+                    </div>
+                    <div class="form-group">
+                        <label for="currency">Currency</label>
+                        <input type="text" id="currency" value="USD" readonly>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="productName">Product Name</label>
+                    <input type="text" id="productName" value="Demo Product">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="productCategory">Product Category</label>
+                        <input type="text" id="productCategory" value="Electronics">
+                    </div>
+                    <div class="form-group">
+                        <label for="productImageUrl">Product Image URL (optional)</label>
+                        <input type="url" id="productImageUrl" value="https://example.com/product.jpg">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="customerName">Customer Name</label>
+                    <input type="text" id="customerName" value="John Doe">
+                </div>
+                <div class="form-group">
+                    <label for="metadata">Metadata (JSON)</label>
+                    <textarea id="metadata" rows="4" placeholder='{"source": "demo", "campaign": "summer-sale"}'>{"source": "demo", "campaign": "summer-sale"}</textarea>
+                </div>
+            </div>
+
+            <div id="orderCancellationFields" class="webhook-fields hidden">
+                <div class="form-group">
+                    <label for="cancelOrderId">Order ID to Cancel</label>
+                    <input type="text" id="cancelOrderId" value="ORD-DEMO-001">
+                </div>
+                <div class="form-group">
+                    <label for="cancelReason">Cancellation Reason (optional)</label>
+                    <textarea id="cancelReason" rows="3" placeholder="Customer requested cancellation"></textarea>
+                </div>
+            </div>
+
+            <button id="sendWebhook" class="btn btn-primary">Send Webhook</button>
+        </section>
+
+        <section class="card response-section">
+            <h2>Response</h2>
+            <div class="response-header">
+                <span id="responseStatus" class="status-badge pending">No request sent</span>
+                <button id="copyResponse" class="btn-icon" disabled aria-label="Copy response">📋</button>
+            </div>
+            <pre id="responseBody" class="response-body">{"message": "Configure your shop ID and webhook secret, then send a test webhook."}</pre>
+        </section>
+
+        <section class="card logs-section">
+            <h2>Request Logs</h2>
+            <div id="logs" class="logs-container">
+                <p class="empty-logs">No requests sent yet.</p>
+            </div>
+            <button id="clearLogs" class="btn btn-secondary btn-small">Clear Logs</button>
+        </section>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
