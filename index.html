@@ -39,6 +39,14 @@
                 </div>
                 <span class="help-text">Generated in your merchant portal</span>
             </div>
+            <div class="form-group">
+                <label for="gatewayLinkToken">Gateway Link Token (mm_ref)</label>
+                <div class="secret-input">
+                    <input type="text" id="gatewayLinkToken" placeholder="Marketer's gateway link token (e.g., TRK-DEMO-ABC123)">
+                    <button type="button" id="fetchTrackingCode" class="btn-icon" aria-label="Fetch tracking code from gateway" title="Fetch tracking code from gateway API">↻</button>
+                </div>
+                <span class="help-text">Enter a marketer's gateway link token to auto-fetch tracking code</span>
+            </div>
             <button id="testConfig" class="btn btn-secondary">Test Configuration</button>
         </section>
 
@@ -57,8 +65,9 @@
                         <input type="text" id="orderId" value="ORD-DEMO-001">
                     </div>
                     <div class="form-group">
-                        <label for="trackingCode">Tracking Code</label>
+                        <label for="trackingCode">Tracking Code (mm_ref)</label>
                         <input type="text" id="trackingCode" value="TRK-DEMO-ABC123">
+                        <span class="help-text">Auto-filled from gateway link token, or enter manually</span>
                     </div>
                 </div>
                 <div class="form-row">

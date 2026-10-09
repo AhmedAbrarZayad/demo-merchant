@@ -143,6 +143,15 @@ header h1 {
     cursor: not-allowed;
 }
 
+.btn-icon.loading {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .btn {
     padding: 12px 24px;
     border: none;

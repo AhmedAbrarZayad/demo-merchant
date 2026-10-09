@@ -5,7 +5,8 @@ const state = {
     config: {
         apiBaseUrl: 'http://localhost:8000',
         shopId: '',
-        webhookSecret: ''
+        webhookSecret: '',
+        gatewayLinkToken: ''
     },
     backendUrl: '',
     logs: []
@@ -16,6 +17,8 @@ const elements = {
     backendUrl: document.getElementById('backendUrl'),
     shopId: document.getElementById('shopId'),
     webhookSecret: document.getElementById('webhookSecret'),
+    gatewayLinkToken: document.getElementById('gatewayLinkToken'),
+    fetchTrackingCode: document.getElementById('fetchTrackingCode'),
     toggleSecret: document.getElementById('toggleSecret'),
     testConfig: document.getElementById('testConfig'),
     tabBtns: document.querySelectorAll('.tab-btn'),
@@ -46,6 +49,7 @@ function loadConfig() {
             elements.apiBaseUrl.value = state.config.apiBaseUrl;
             elements.shopId.value = state.config.shopId;
             elements.webhookSecret.value = state.config.webhookSecret;
+            elements.gatewayLinkToken.value = state.config.gatewayLinkToken || '';
             if (elements.backendUrl) {
                 elements.backendUrl.value = state.config.backendUrl || '';
             }
@@ -73,6 +77,7 @@ function saveConfig() {
     state.config.apiBaseUrl = elements.apiBaseUrl.value.trim();
     state.config.shopId = elements.shopId.value.trim();
     state.config.webhookSecret = elements.webhookSecret.value;
+    state.config.gatewayLinkToken = elements.gatewayLinkToken.value.trim();
     if (elements.backendUrl) {
         state.config.backendUrl = elements.backendUrl.value.trim();
     }
@@ -86,6 +91,7 @@ function bindEvents() {
     elements.apiBaseUrl.addEventListener('input', saveConfig);
     elements.shopId.addEventListener('input', saveConfig);
     elements.webhookSecret.addEventListener('input', saveConfig);
+    elements.gatewayLinkToken.addEventListener('input', saveConfig);
     elements.backendUrl?.addEventListener('input', saveConfig);
     
     elements.toggleSecret.addEventListener('click', () => {
@@ -93,6 +99,8 @@ function bindEvents() {
         elements.webhookSecret.type = type;
         elements.toggleSecret.textContent = type === 'password' ? '👁' : '🙈';
     });
+    
+    elements.fetchTrackingCode.addEventListener('click', fetchTrackingCode);
     
     elements.testConfig.addEventListener('click', testConfiguration);
     
@@ -146,13 +154,28 @@ async function testConfiguration() {
         return;
     }
     
+    let trackingCode = 'TEST-TRACKING';
+    if (state.config.gatewayLinkToken && state.config.apiBaseUrl) {
+        try {
+            const url = `${state.config.apiBaseUrl.replace(/\/$/, '')}/api/v1/gateway/links/public/${state.config.gatewayLinkToken}/shops/${state.config.shopId}/destination/`;
+            const response = await fetch(url);
+            const data = await response.json();
+            if (response.ok && data.redirect_url) {
+                const redirectUrl = new URL(data.redirect_url);
+                trackingCode = redirectUrl.searchParams.get('mm_ref') || 'TEST-TRACKING';
+            }
+        } catch (e) {
+            console.warn('Could not fetch tracking code for test:', e);
+        }
+    }
+    
     const testPayload = {
         schema_version: '1.0',
         event_type: 'sale.completed',
         occurred_at: new Date().toISOString(),
         data: {
             order_id: 'TEST-CONFIG',
-            tracking_code: 'TEST-TRACKING',
+            tracking_code: trackingCode,
             amount: '1.00',
             currency: 'USD',
             product: { name: 'Test', category: 'Test' },
@@ -195,6 +218,63 @@ async function testConfiguration() {
     } catch (error) {
         showResponse('error', { error: { code: 'network_error', message: error.message } });
         addLog('order_confirmation', 'error', testPayload, { error: { code: 'network_error', message: error.message } }, 0);
+    }
+}
+
+async function fetchTrackingCode() {
+    const linkToken = elements.gatewayLinkToken.value.trim();
+    const shopId = elements.shopId.value.trim();
+    const apiBaseUrl = elements.apiBaseUrl.value.trim();
+    
+    if (!linkToken) {
+        showResponse('error', { error: { code: 'missing_link_token', message: 'Please enter a gateway link token' } });
+        return;
+    }
+    if (!shopId) {
+        showResponse('error', { error: { code: 'missing_shop_id', message: 'Please enter Shop ID first' } });
+        return;
+    }
+    if (!apiBaseUrl) {
+        showResponse('error', { error: { code: 'missing_api_url', message: 'Please enter API Base URL first' } });
+        return;
+    }
+    
+    elements.fetchTrackingCode.disabled = true;
+    elements.fetchTrackingCode.classList.add('loading');
+    
+    try {
+        const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/gateway/links/public/${linkToken}/shops/${shopId}/destination/`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error?.message || `HTTP ${response.status}`);
+        }
+        
+        if (!data.redirect_url) {
+            throw new Error('No redirect_url in response');
+        }
+        
+        const redirectUrl = new URL(data.redirect_url);
+        const mmRef = redirectUrl.searchParams.get('mm_ref');
+        
+        if (!mmRef) {
+            throw new Error('No mm_ref parameter in redirect URL');
+        }
+        
+        document.getElementById('trackingCode').value = mmRef;
+        updateSendButtonState();
+        
+        showResponse('success', { 
+            message: 'Tracking code fetched successfully!', 
+            trackingCode: mmRef,
+            redirectUrl: data.redirect_url
+        });
+    } catch (error) {
+        showResponse('error', { error: { code: 'fetch_failed', message: error.message } });
+    } finally {
+        elements.fetchTrackingCode.disabled = false;
+        elements.fetchTrackingCode.classList.remove('loading');
     }
 }
 
