@@ -14,6 +14,16 @@ let attributed = false;
 let configured = false;
 let lastCompletedSale = null;
 
+// Compatibility for shop destinations configured as the merchant origin instead
+// of the preferred /capture endpoint. The server still performs the actual
+// validation and HttpOnly cookie write.
+const landingUrl = new URL(window.location.href);
+const landingToken = landingUrl.searchParams.get('mm_ref');
+const isRedirectingToCapture = Boolean(landingToken && /^[A-Za-z0-9_-]{16,120}$/.test(landingToken));
+if (isRedirectingToCapture) {
+  window.location.replace(`/capture?mm_ref=${encodeURIComponent(landingToken)}`);
+}
+
 function currentSale() {
   let metadata = {};
   const metadataText = document.getElementById('metadata').value.trim();
@@ -94,4 +104,4 @@ async function send(webhookType) {
 elements.completeOrder.addEventListener('click', () => void send('order_confirmation'));
 elements.cancelOrder.addEventListener('click', () => void send('order_cancellation'));
 elements.copyResponse.addEventListener('click', () => void navigator.clipboard.writeText(elements.responseBody.textContent));
-void loadAttribution();
+if (!isRedirectingToCapture) void loadAttribution();

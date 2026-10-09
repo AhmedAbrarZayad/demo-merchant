@@ -13,6 +13,8 @@ This separate storefront demonstrates the production merchant integration contra
 
 The browser never receives the webhook secret. Endpoint, Shop ID, and secret are server environment variables.
 
+The storefront also forwards `/?mm_ref=...` to `/capture` as a compatibility fallback when a shop was configured with only the merchant origin. `/capture` remains the recommended shop URL because it captures attribution directly on the server.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and set:
