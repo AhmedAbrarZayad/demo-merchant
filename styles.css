@@ -61,6 +61,16 @@ header h1 {
     display: block;
 }
 
+.attribution { padding: 12px 14px; border-radius: 8px; font-weight: 600; margin-bottom: 10px; }
+.attribution.pending { background: #fef3c7; color: #92400e; }
+.attribution.success { background: #d1fae5; color: #065f46; }
+.attribution.error { background: #fee2e2; color: #991b1b; }
+.integration-details { display: grid; gap: 10px; margin-top: 18px; }
+.integration-details div { background: #f8fafc; border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; }
+.integration-details dt { color: #666; font-size: .75rem; font-weight: 700; text-transform: uppercase; }
+.integration-details dd { margin-top: 3px; overflow-wrap: anywhere; font-family: monospace; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
 .optional-badge {
     font-size: 0.7rem;
     color: #888;

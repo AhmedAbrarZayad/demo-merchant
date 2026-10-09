@@ -1,488 +1,97 @@
-const BACKEND_API_ENDPOINT = '/api/send-webhook';
-const HEALTH_ENDPOINT = '/api/health';
-
-const state = {
-    config: {
-        apiBaseUrl: 'http://localhost:8000',
-        shopId: '',
-        webhookSecret: '',
-        gatewayLinkToken: ''
-    },
-    backendUrl: '',
-    logs: []
-};
-
 const elements = {
-    apiBaseUrl: document.getElementById('apiBaseUrl'),
-    backendUrl: document.getElementById('backendUrl'),
-    shopId: document.getElementById('shopId'),
-    webhookSecret: document.getElementById('webhookSecret'),
-    gatewayLinkToken: document.getElementById('gatewayLinkToken'),
-    fetchTrackingCode: document.getElementById('fetchTrackingCode'),
-    toggleSecret: document.getElementById('toggleSecret'),
-    testConfig: document.getElementById('testConfig'),
-    tabBtns: document.querySelectorAll('.tab-btn'),
-    orderConfirmationFields: document.getElementById('orderConfirmationFields'),
-    orderCancellationFields: document.getElementById('orderCancellationFields'),
-    sendWebhook: document.getElementById('sendWebhook'),
-    responseStatus: document.getElementById('responseStatus'),
-    responseBody: document.getElementById('responseBody'),
-    copyResponse: document.getElementById('copyResponse'),
-    logs: document.getElementById('logs'),
-    clearLogs: document.getElementById('clearLogs')
+  attributionStatus: document.getElementById('attributionStatus'),
+  shopId: document.getElementById('shopId'),
+  trackingCode: document.getElementById('trackingCode'),
+  completeOrder: document.getElementById('completeOrder'),
+  cancelOrder: document.getElementById('cancelOrder'),
+  checkoutHelp: document.getElementById('checkoutHelp'),
+  responseStatus: document.getElementById('responseStatus'),
+  responseBody: document.getElementById('responseBody'),
+  copyResponse: document.getElementById('copyResponse')
 };
 
-let currentWebhookType = 'order_confirmation';
+let attributed = false;
+let configured = false;
+let lastCompletedSale = null;
 
-function init() {
-    loadConfig();
-    bindEvents();
-    updateSendButtonState();
+function currentSale() {
+  let metadata = {};
+  const metadataText = document.getElementById('metadata').value.trim();
+  if (metadataText) {
+    metadata = JSON.parse(metadataText);
+    if (!metadata || Array.isArray(metadata) || typeof metadata !== 'object') throw new Error('Metadata must be a JSON object.');
+  }
+  const sale = {
+    order_id: document.getElementById('orderId').value.trim(),
+    amount: document.getElementById('amount').value,
+    product_name: document.getElementById('productName').value.trim(),
+    product_category: document.getElementById('productCategory').value.trim(),
+    product_image_url: document.getElementById('productImageUrl').value.trim(),
+    customer_name: document.getElementById('customerName').value.trim(),
+    metadata
+  };
+  if (!sale.order_id || !sale.amount || !sale.product_name || !sale.product_category || !sale.customer_name) throw new Error('Fill in every required checkout field.');
+  return sale;
 }
 
-function loadConfig() {
-    const saved = localStorage.getItem('demoMerchantConfig');
-    if (saved) {
-        try {
-            const config = JSON.parse(saved);
-            state.config = { ...state.config, ...config };
-            elements.apiBaseUrl.value = state.config.apiBaseUrl;
-            elements.shopId.value = state.config.shopId;
-            elements.webhookSecret.value = state.config.webhookSecret;
-            elements.gatewayLinkToken.value = state.config.gatewayLinkToken || '';
-            if (elements.backendUrl) {
-                elements.backendUrl.value = state.config.backendUrl || '';
-            }
-        } catch (e) {
-            console.error('Failed to load config:', e);
-        }
-    }
-    
-    if (!state.config.backendUrl) {
-        state.config.backendUrl = '';
-    }
-    
-    const savedLogs = localStorage.getItem('demoMerchantLogs');
-    if (savedLogs) {
-        try {
-            state.logs = JSON.parse(savedLogs);
-            renderLogs();
-        } catch (e) {
-            console.error('Failed to load logs:', e);
-        }
-    }
+function showResponse(ok, data, status) {
+  elements.responseStatus.className = `status-badge ${ok ? 'success' : 'error'}`;
+  elements.responseStatus.textContent = status ? `${status} ${ok ? 'accepted' : 'error'}` : (ok ? 'Success' : 'Error');
+  elements.responseBody.textContent = JSON.stringify(data, null, 2);
+  elements.copyResponse.disabled = false;
 }
 
-function saveConfig() {
-    state.config.apiBaseUrl = elements.apiBaseUrl.value.trim();
-    state.config.shopId = elements.shopId.value.trim();
-    state.config.webhookSecret = elements.webhookSecret.value;
-    state.config.gatewayLinkToken = elements.gatewayLinkToken.value.trim();
-    if (elements.backendUrl) {
-        state.config.backendUrl = elements.backendUrl.value.trim();
-    }
-    if (!state.config.backendUrl) {
-        state.config.backendUrl = '';
-    }
-    localStorage.setItem('demoMerchantConfig', JSON.stringify(state.config));
+async function loadAttribution() {
+  try {
+    const response = await fetch('/api/attribution', { cache: 'no-store', credentials: 'same-origin' });
+    const data = await response.json();
+    attributed = Boolean(data.attributed);
+    configured = Boolean(data.configured);
+    elements.shopId.textContent = data.shopId || 'Server not configured';
+    elements.trackingCode.textContent = attributed ? 'Stored in an HttpOnly server cookie' : 'No attribution captured';
+    elements.attributionStatus.className = `attribution ${attributed ? 'success' : 'error'}`;
+    elements.attributionStatus.textContent = attributed ? 'Attributed visitor — 30-day cookie active' : 'No marketer attribution';
+    elements.checkoutHelp.textContent = !configured
+      ? 'The merchant server needs its MassiveMarket endpoint, Shop ID, and webhook secret environment variables.'
+      : attributed ? 'Checkout will use the captured tracking code automatically.' : 'Open this shop through a marketer’s public link before checking out.';
+  } catch (error) {
+    elements.attributionStatus.className = 'attribution error';
+    elements.attributionStatus.textContent = 'Could not check attribution';
+    elements.checkoutHelp.textContent = error.message;
+  }
+  elements.completeOrder.disabled = !(attributed && configured);
+  elements.cancelOrder.disabled = !(attributed && configured && lastCompletedSale);
 }
 
-function bindEvents() {
-    elements.apiBaseUrl.addEventListener('input', saveConfig);
-    elements.shopId.addEventListener('input', saveConfig);
-    elements.webhookSecret.addEventListener('input', saveConfig);
-    elements.gatewayLinkToken.addEventListener('input', saveConfig);
-    elements.backendUrl?.addEventListener('input', saveConfig);
-    
-    elements.toggleSecret.addEventListener('click', () => {
-        const type = elements.webhookSecret.type === 'password' ? 'text' : 'password';
-        elements.webhookSecret.type = type;
-        elements.toggleSecret.textContent = type === 'password' ? '👁' : '🙈';
+async function send(webhookType) {
+  let sale;
+  try { sale = webhookType === 'order_cancellation' ? lastCompletedSale : currentSale(); }
+  catch (error) { showResponse(false, { error: { code: 'invalid_checkout', message: error.message } }); return; }
+  if (!sale) { showResponse(false, { error: { code: 'missing_order', message: 'Complete an order before cancelling it.' } }); return; }
+
+  elements.completeOrder.disabled = true;
+  elements.cancelOrder.disabled = true;
+  try {
+    const response = await fetch('/api/send-webhook', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ webhookType, sale })
     });
-    
-    elements.fetchTrackingCode.addEventListener('click', fetchTrackingCode);
-    
-    elements.testConfig.addEventListener('click', testConfiguration);
-    
-    elements.tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.type));
-    });
-    
-    elements.sendWebhook.addEventListener('click', sendWebhook);
-    elements.copyResponse.addEventListener('click', copyResponse);
-    elements.clearLogs.addEventListener('click', clearLogs);
-    
-    document.querySelectorAll('#orderConfirmationFields input, #orderConfirmationFields textarea').forEach(el => {
-        el.addEventListener('input', updateSendButtonState);
-    });
-    document.querySelectorAll('#orderCancellationFields input, #orderCancellationFields textarea').forEach(el => {
-        el.addEventListener('input', updateSendButtonState);
-    });
+    const data = await response.json();
+    const ok = response.ok && data.success === true;
+    showResponse(ok, data, response.status);
+    if (ok && webhookType === 'order_confirmation') lastCompletedSale = sale;
+    if (ok && webhookType === 'order_cancellation') lastCompletedSale = null;
+  } catch (error) {
+    showResponse(false, { error: { code: 'network_error', message: error.message } });
+  } finally {
+    elements.completeOrder.disabled = !(attributed && configured);
+    elements.cancelOrder.disabled = !(attributed && configured && lastCompletedSale);
+  }
 }
 
-function switchTab(type) {
-    currentWebhookType = type;
-    elements.tabBtns.forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.type === type);
-    });
-    elements.orderConfirmationFields.classList.toggle('hidden', type !== 'order_confirmation');
-    elements.orderCancellationFields.classList.toggle('hidden', type !== 'order_cancellation');
-    updateSendButtonState();
-}
-
-function updateSendButtonState() {
-    const hasConfig = state.config.shopId && state.config.webhookSecret;
-    let hasFields = false;
-    
-    if (currentWebhookType === 'order_confirmation') {
-        hasFields = document.getElementById('orderId').value.trim() &&
-                    document.getElementById('trackingCode').value.trim() &&
-                    document.getElementById('amount').value &&
-                    document.getElementById('productName').value.trim() &&
-                    document.getElementById('productCategory').value.trim() &&
-                    document.getElementById('customerName').value.trim();
-    } else {
-        hasFields = document.getElementById('cancelOrderId').value.trim();
-    }
-    
-    elements.sendWebhook.disabled = !(hasConfig && hasFields);
-}
-
-async function testConfiguration() {
-    if (!state.config.shopId || !state.config.webhookSecret) {
-        showResponse('error', { error: { code: 'missing_config', message: 'Please fill in Shop ID and Webhook Secret' } });
-        return;
-    }
-    
-    let trackingCode = 'TEST-TRACKING';
-    if (state.config.gatewayLinkToken && state.config.apiBaseUrl) {
-        try {
-            const url = `${state.config.apiBaseUrl.replace(/\/$/, '')}/api/v1/gateway/links/public/${state.config.gatewayLinkToken}/shops/${state.config.shopId}/destination/`;
-            const response = await fetch(url);
-            const data = await response.json();
-            if (response.ok && data.redirect_url) {
-                const redirectUrl = new URL(data.redirect_url);
-                trackingCode = redirectUrl.searchParams.get('mm_ref') || 'TEST-TRACKING';
-            }
-        } catch (e) {
-            console.warn('Could not fetch tracking code for test:', e);
-        }
-    }
-    
-    const testPayload = {
-        schema_version: '1.0',
-        event_type: 'sale.completed',
-        occurred_at: new Date().toISOString(),
-        data: {
-            order_id: 'TEST-CONFIG',
-            tracking_code: trackingCode,
-            amount: '1.00',
-            currency: 'USD',
-            product: { name: 'Test', category: 'Test' },
-            customer: { name: 'Test' }
-        }
-    };
-    
-    const backendUrl = state.config.backendUrl || '';
-    
-    try {
-        const response = await fetch(`${backendUrl}${BACKEND_API_ENDPOINT}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                apiBaseUrl: state.config.apiBaseUrl,
-                shopId: state.config.shopId,
-                webhookSecret: state.config.webhookSecret,
-                webhookType: 'order_confirmation',
-                payload: testPayload
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (response.status === 401 || response.status === 403) {
-            showResponse('error', data);
-            addLog('order_confirmation', 'error', testPayload, data, response.status);
-        } else if (response.status === 404) {
-            showResponse('error', { error: { code: 'shop_not_found', message: 'Shop not found. Check your Shop ID.' } });
-            addLog('order_confirmation', 'error', testPayload, { error: { code: 'shop_not_found', message: 'Shop not found' } }, response.status);
-        } else if (response.status === 400 && data.error?.code === 'invalid_signature') {
-            showResponse('error', { error: { code: 'invalid_secret', message: 'Invalid webhook secret. Check your secret in the portal.' } });
-            addLog('order_confirmation', 'error', testPayload, { error: { code: 'invalid_secret', message: 'Invalid webhook secret' } }, response.status);
-        } else {
-            showResponse('success', { message: 'Configuration is valid!', testResponse: data });
-            addLog('order_confirmation', 'success', testPayload, data, response.status);
-        }
-    } catch (error) {
-        showResponse('error', { error: { code: 'network_error', message: error.message } });
-        addLog('order_confirmation', 'error', testPayload, { error: { code: 'network_error', message: error.message } }, 0);
-    }
-}
-
-async function fetchTrackingCode() {
-    const linkToken = elements.gatewayLinkToken.value.trim();
-    const shopId = elements.shopId.value.trim();
-    const apiBaseUrl = elements.apiBaseUrl.value.trim();
-    
-    if (!linkToken) {
-        showResponse('error', { error: { code: 'missing_link_token', message: 'Please enter a gateway link token' } });
-        return;
-    }
-    if (!shopId) {
-        showResponse('error', { error: { code: 'missing_shop_id', message: 'Please enter Shop ID first' } });
-        return;
-    }
-    if (!apiBaseUrl) {
-        showResponse('error', { error: { code: 'missing_api_url', message: 'Please enter API Base URL first' } });
-        return;
-    }
-    
-    elements.fetchTrackingCode.disabled = true;
-    elements.fetchTrackingCode.classList.add('loading');
-    
-    try {
-        const url = `${apiBaseUrl.replace(/\/$/, '')}/api/v1/gateway/links/public/${linkToken}/shops/${shopId}/destination/`;
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error?.message || `HTTP ${response.status}`);
-        }
-        
-        if (!data.redirect_url) {
-            throw new Error('No redirect_url in response');
-        }
-        
-        const redirectUrl = new URL(data.redirect_url);
-        const mmRef = redirectUrl.searchParams.get('mm_ref');
-        
-        if (!mmRef) {
-            throw new Error('No mm_ref parameter in redirect URL');
-        }
-        
-        document.getElementById('trackingCode').value = mmRef;
-        updateSendButtonState();
-        
-        showResponse('success', { 
-            message: 'Tracking code fetched successfully!', 
-            trackingCode: mmRef,
-            redirectUrl: data.redirect_url
-        });
-    } catch (error) {
-        showResponse('error', { error: { code: 'fetch_failed', message: error.message } });
-    } finally {
-        elements.fetchTrackingCode.disabled = false;
-        elements.fetchTrackingCode.classList.remove('loading');
-    }
-}
-
-async function sendWebhook() {
-    if (!state.config.shopId || !state.config.webhookSecret) {
-        showResponse('error', { error: { code: 'missing_config', message: 'Please configure Shop ID and Webhook Secret first' } });
-        return;
-    }
-    
-    let payload;
-    if (currentWebhookType === 'order_confirmation') {
-        payload = buildOrderConfirmationPayload();
-    } else {
-        payload = buildOrderCancellationPayload();
-    }
-    
-    if (!payload) return;
-    
-    elements.sendWebhook.disabled = true;
-    elements.sendWebhook.textContent = 'Sending...';
-    
-    const backendUrl = state.config.backendUrl || '';
-    
-    try {
-        const response = await fetch(`${backendUrl}${BACKEND_API_ENDPOINT}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                apiBaseUrl: state.config.apiBaseUrl,
-                shopId: state.config.shopId,
-                webhookSecret: state.config.webhookSecret,
-                webhookType: currentWebhookType,
-                payload: payload
-            })
-        });
-        
-        const data = await response.json();
-        const isSuccess = response.ok && data.success === true;
-        
-        showResponse(isSuccess ? 'success' : 'error', data);
-        addLog(currentWebhookType, isSuccess ? 'success' : 'error', payload, data, response.status);
-    } catch (error) {
-        showResponse('error', { error: { code: 'network_error', message: error.message } });
-        addLog(currentWebhookType, 'error', payload, { error: { code: 'network_error', message: error.message } }, 0);
-    } finally {
-        elements.sendWebhook.disabled = false;
-        elements.sendWebhook.textContent = 'Send Webhook';
-        updateSendButtonState();
-    }
-}
-
-function buildOrderConfirmationPayload() {
-    const orderId = document.getElementById('orderId').value.trim();
-    const trackingCode = document.getElementById('trackingCode').value.trim();
-    const amount = document.getElementById('amount').value;
-    const productName = document.getElementById('productName').value.trim();
-    const productCategory = document.getElementById('productCategory').value.trim();
-    const productImageUrl = document.getElementById('productImageUrl').value.trim();
-    const customerName = document.getElementById('customerName').value.trim();
-    let metadata = {};
-    
-    try {
-        const metadataStr = document.getElementById('metadata').value.trim();
-        if (metadataStr) {
-            metadata = JSON.parse(metadataStr);
-        }
-    } catch (e) {
-        showResponse('error', { error: { code: 'invalid_metadata', message: 'Metadata must be valid JSON' } });
-        return null;
-    }
-    
-    if (!orderId || !trackingCode || !amount || !productName || !productCategory || !customerName) {
-        showResponse('error', { error: { code: 'missing_fields', message: 'Please fill in all required fields' } });
-        return null;
-    }
-    
-    return {
-        schema_version: '1.0',
-        event_type: 'sale.completed',
-        occurred_at: new Date().toISOString(),
-        data: {
-            order_id: orderId,
-            tracking_code: trackingCode,
-            amount: parseFloat(amount).toFixed(2),
-            currency: 'USD',
-            product: {
-                name: productName,
-                category: productCategory,
-                image_url: productImageUrl
-            },
-            customer: {
-                name: customerName
-            },
-            metadata
-        }
-    };
-}
-
-function buildOrderCancellationPayload() {
-    const orderId = document.getElementById('cancelOrderId').value.trim();
-    const reason = document.getElementById('cancelReason').value.trim();
-    
-    if (!orderId) {
-        showResponse('error', { error: { code: 'missing_fields', message: 'Please enter Order ID to cancel' } });
-        return null;
-    }
-    
-    return {
-        schema_version: '1.0',
-        event_type: 'sale.cancelled',
-        occurred_at: new Date().toISOString(),
-        data: {
-            order_id: orderId,
-            reason: reason || 'Cancelled by merchant'
-        }
-    };
-}
-
-async function generateSignature(payload, secret) {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(payload);
-    
-    const key = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-    );
-    
-    const signature = await crypto.subtle.sign('HMAC', key, messageData);
-    return Array.from(new Uint8Array(signature))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('');
-}
-
-function showResponse(status, data) {
-    elements.responseStatus.className = `status-badge ${status}`;
-    elements.responseStatus.textContent = status === 'success' ? 'Success' : status === 'error' ? 'Error' : 'Pending';
-    elements.responseBody.textContent = JSON.stringify(data, null, 2);
-    elements.copyResponse.disabled = false;
-    
-    if (status === 'success') {
-        elements.responseBody.style.borderLeft = '4px solid #10b981';
-    } else if (status === 'error') {
-        elements.responseBody.style.borderLeft = '4px solid #ef4444';
-    } else {
-        elements.responseBody.style.borderLeft = '4px solid #f59e0b';
-    }
-}
-
-async function copyResponse() {
-    try {
-        await navigator.clipboard.writeText(elements.responseBody.textContent);
-        const original = elements.copyResponse.textContent;
-        elements.copyResponse.textContent = '✓';
-        setTimeout(() => elements.copyResponse.textContent = original, 1500);
-    } catch (e) {
-        console.error('Failed to copy:', e);
-    }
-}
-
-function addLog(type, status, request, response, httpStatus) {
-    const log = {
-        id: Date.now(),
-        type,
-        status,
-        request,
-        response,
-        httpStatus,
-        timestamp: new Date().toISOString()
-    };
-    
-    state.logs.unshift(log);
-    if (state.logs.length > 50) state.logs.pop();
-    localStorage.setItem('demoMerchantLogs', JSON.stringify(state.logs));
-    renderLogs();
-}
-
-function renderLogs() {
-    if (state.logs.length === 0) {
-        elements.logs.innerHTML = '<p class="empty-logs">No requests sent yet.</p>';
-        return;
-    }
-    
-    elements.logs.innerHTML = state.logs.map(log => `
-        <div class="log-entry">
-            <div class="log-entry-header">
-                <span class="log-entry-type">${log.type.replace('_', ' ')}</span>
-                <span class="log-entry-time">${new Date(log.timestamp).toLocaleTimeString()}</span>
-                <span class="log-entry-status ${log.status}">${log.status}</span>
-            </div>
-            <div class="log-entry-details">${JSON.stringify({
-                request: log.request,
-                response: log.response,
-                httpStatus: log.httpStatus
-            }, null, 2)}</div>
-        </div>
-    `).join('');
-}
-
-function clearLogs() {
-    state.logs = [];
-    localStorage.removeItem('demoMerchantLogs');
-    renderLogs();
-}
-
-document.addEventListener('DOMContentLoaded', init);
+elements.completeOrder.addEventListener('click', () => void send('order_confirmation'));
+elements.cancelOrder.addEventListener('click', () => void send('order_cancellation'));
+elements.copyResponse.addEventListener('click', () => void navigator.clipboard.writeText(elements.responseBody.textContent));
+void loadAttribution();

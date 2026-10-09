@@ -28,6 +28,14 @@
       "dest": "/api/send-webhook.js"
     },
     {
+      "src": "/api/attribution",
+      "dest": "/api/attribution.js"
+    },
+    {
+      "src": "/capture",
+      "dest": "/api/capture.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "/$1"
     }

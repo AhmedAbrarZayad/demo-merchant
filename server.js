@@ -1,77 +1,39 @@
 import express from 'express';
-import cors from 'cors';
-import crypto from 'crypto';
-import fetch from 'node-fetch';
 import 'dotenv/config';
+import { attributionCookie, attributionFromRequest, forwardWebhook, publicConfig, TOKEN_PATTERN } from './api/_shared.js';
 
 const app = express();
-const PORT = process.env.PORT || 3001;
-
-app.use(cors());
+const port = process.env.PORT || 3001;
 app.use(express.json({ limit: '64kb' }));
 
-const API_ENDPOINT = '/api/v1/webhooks/sale/';
+app.get('/capture', (req, res) => {
+  const value = typeof req.query.mm_ref === 'string' ? req.query.mm_ref : '';
+  if (!TOKEN_PATTERN.test(value)) return res.status(400).send('Invalid or missing mm_ref attribution token.');
+  const secure = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', attributionCookie(value, secure));
+  res.setHeader('Cache-Control', 'no-store');
+  return res.redirect(302, '/');
+});
 
-function generateSignature(payload, secret) {
-  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
-}
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'demo-merchant-backend' });
+app.get('/api/attribution', (req, res) => {
+  const trackingCode = attributionFromRequest(req);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.json({ ...publicConfig(), attributed: Boolean(trackingCode) });
 });
 
 app.post('/api/send-webhook', async (req, res) => {
+  const trackingCode = attributionFromRequest(req);
+  if (!trackingCode) return res.status(400).json({ success: false, error: { code: 'missing_attribution', message: 'Enter this shop through a marketer link before checking out.' } });
+  const webhookType = req.body?.webhookType;
+  if (!['order_confirmation', 'order_cancellation'].includes(webhookType)) return res.status(400).json({ success: false, error: { code: 'invalid_webhook_type', message: 'Invalid webhook type.' } });
   try {
-    const { apiBaseUrl, shopId, webhookSecret, webhookType, payload } = req.body;
-
-    if (!apiBaseUrl || !shopId || !webhookSecret || !webhookType || !payload) {
-      return res.status(400).json({
-        error: {
-          code: 'missing_fields',
-          message: 'Missing required fields: apiBaseUrl, shopId, webhookSecret, webhookType, payload'
-        }
-      });
-    }
-
-    if (!['order_confirmation', 'order_cancellation'].includes(webhookType)) {
-      return res.status(400).json({
-        error: {
-          code: 'invalid_webhook_type',
-          message: 'webhookType must be order_confirmation or order_cancellation'
-        }
-      });
-    }
-
-    const payloadStr = JSON.stringify(payload);
-    const signature = generateSignature(payloadStr, webhookSecret);
-
-    const targetUrl = `${apiBaseUrl.replace(/\/$/, '')}${API_ENDPOINT}`;
-
-    const response = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shop-ID': shopId,
-        'X-Webhook-Signature': signature,
-        'X-Webhook-Type': webhookType
-      },
-      body: payloadStr
-    });
-
-    const data = await response.json();
-
-    return res.status(response.status).json(data);
+    const result = await forwardWebhook({ trackingCode, webhookType, sale: req.body?.sale || {} });
+    return res.status(result.status).json(result.body);
   } catch (error) {
-    console.error('Webhook proxy error:', error);
-    return res.status(500).json({
-      error: {
-        code: 'proxy_error',
-        message: error.message || 'Internal proxy error'
-      }
-    });
+    return res.status(502).json({ success: false, error: { code: 'upstream_error', message: error.message || 'Could not reach MassiveMarket.' } });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Demo merchant backend running on http://localhost:${PORT}`);
-});
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'demo-merchant' }));
+app.use(express.static('.'));
+app.listen(port, () => console.log(`Demo merchant running on http://localhost:${port}`));
